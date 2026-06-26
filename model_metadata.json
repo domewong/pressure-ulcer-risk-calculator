@@ -1,0 +1,44 @@
+{
+  "model_name": "SVM model for ICU-acquired pressure injury prediction",
+  "outcome": "ICU-acquired pressure injury",
+  "features": [
+    "age_years",
+    "sofa_score",
+    "spo2_pct",
+    "hemoglobin_gl",
+    "albumin_gl",
+    "mechanical_ventilation",
+    "ventilation_mode",
+    "vasoactive_drugs"
+  ],
+  "feature_labels": {
+    "age_years": "Age, years",
+    "sofa_score": "SOFA score",
+    "spo2_pct": "SpO2, %",
+    "hemoglobin_gl": "Hemoglobin, g/L",
+    "albumin_gl": "Albumin, g/L",
+    "mechanical_ventilation": "Mechanical ventilation",
+    "ventilation_mode": "Ventilation mode",
+    "vasoactive_drugs": "Vasoactive drugs"
+  },
+  "categorical_encoding": {
+    "mechanical_ventilation": {
+      "No": 0,
+      "Yes": 1
+    },
+    "ventilation_mode": {
+      "No ventilation": 0,
+      "Non-invasive ventilation": 1,
+      "Invasive ventilation": 2
+    },
+    "vasoactive_drugs": {
+      "No": 0,
+      "Yes": 1
+    }
+  },
+  "risk_thresholds": {
+    "low": 0.10,
+    "moderate": 0.20
+  },
+  "disclaimer": "This tool is intended for research demonstration only and should not be used as a standalone clinical decision-making tool before external validation."
+}
