@@ -28,8 +28,10 @@ st.set_page_config(
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "model" / "final_svm_model.pkl"
-METADATA_PATH = BASE_DIR / "model" / "model_metadata.json"
+
+# 注意：这里要和 GitHub 仓库里的文件名完全一致
+MODEL_PATH = BASE_DIR / "final_full_data_SVM.pkl"
+METADATA_PATH = BASE_DIR / "model_metadata.json"
 
 
 # ============================================================
@@ -38,15 +40,29 @@ METADATA_PATH = BASE_DIR / "model" / "model_metadata.json"
 
 @st.cache_resource
 def load_model():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {MODEL_PATH}. "
+            "Please make sure final_full_data_SVM.pkl is uploaded to the GitHub repository root."
+        )
+
     with open(MODEL_PATH, "rb") as f:
-        model = pickle.load(f)
-    return model
+        loaded_model = pickle.load(f)
+
+    return loaded_model
 
 
 @st.cache_data
 def load_metadata():
+    if not METADATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Metadata file not found: {METADATA_PATH}. "
+            "Please make sure model_metadata.json is uploaded to the GitHub repository root."
+        )
+
     with open(METADATA_PATH, "r", encoding="utf-8") as f:
         metadata = json.load(f)
+
     return metadata
 
 
@@ -69,15 +85,26 @@ def predict_probability(input_df: pd.DataFrame) -> float:
     The saved model should include the same preprocessing pipeline
     used during model development.
     """
+
+    # 情况1：直接保存的是 sklearn 模型或 Pipeline
     if hasattr(model, "predict_proba"):
         prob = model.predict_proba(input_df)[:, 1][0]
+
+    # 情况2：保存的是字典，模型在 model["model"] 里面
     elif isinstance(model, dict) and "model" in model:
         fitted_model = model["model"]
-        prob = fitted_model.predict_proba(input_df)[:, 1][0]
+
+        if hasattr(fitted_model, "predict_proba"):
+            prob = fitted_model.predict_proba(input_df)[:, 1][0]
+        else:
+            raise ValueError(
+                "The fitted model inside the saved dictionary does not support predict_proba."
+            )
+
     else:
         raise ValueError(
-            "The loaded model does not support predict_proba. "
-            "Please save the final SVM probability pipeline."
+            "The loaded object does not support predict_proba. "
+            "Please make sure the uploaded .pkl file is the final SVM probability model or pipeline."
         )
 
     return float(prob)
@@ -281,6 +308,7 @@ if submitted:
             st.error(risk_message(prob))
 
         st.markdown("### Input summary")
+
         display_df = pd.DataFrame({
             "Predictor": [
                 "Age, years",
@@ -307,7 +335,9 @@ if submitted:
         st.dataframe(display_df, use_container_width=True)
 
     except Exception as e:
-        st.error("Prediction failed. Please check whether the saved model is compatible with the app.")
+        st.error(
+            "Prediction failed. Please check whether the saved model is compatible with the app."
+        )
         st.exception(e)
 
 
