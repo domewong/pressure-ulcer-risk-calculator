@@ -1,13 +1,13 @@
 # ============================================================
-# Streamlit web calculator:
+# Compact one-screen Streamlit calculator:
 # ICU-acquired pressure injury prediction using final SVM model
+# Screenshot-friendly version for manuscript
 # ============================================================
 
 import json
 import pickle
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -19,26 +19,188 @@ import streamlit as st
 st.set_page_config(
     page_title="ICU Pressure Injury Risk Calculator",
     page_icon="🩺",
-    layout="centered"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
 
 # ============================================================
-# 2. Paths
+# 2. Compact CSS for one-screen screenshot
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+    /* Page width and spacing */
+    .block-container {
+        max-width: 1180px;
+        padding-top: 1.2rem;
+        padding-bottom: 0.8rem;
+        padding-left: 2.2rem;
+        padding-right: 2.2rem;
+    }
+
+    /* Hide Streamlit menu/footer for cleaner screenshot */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Title */
+    h1 {
+        font-size: 2.05rem !important;
+        line-height: 1.15 !important;
+        margin-bottom: 0.25rem !important;
+        color: #1f2937;
+    }
+
+    h2, h3 {
+        margin-top: 0.2rem !important;
+        margin-bottom: 0.45rem !important;
+        color: #1f2937;
+    }
+
+    /* Reduce vertical gaps */
+    div[data-testid="stVerticalBlock"] {
+        gap: 0.45rem;
+    }
+
+    div[data-testid="stHorizontalBlock"] {
+        gap: 1.0rem;
+    }
+
+    /* Input label */
+    label {
+        font-size: 0.86rem !important;
+        font-weight: 600 !important;
+        color: #374151 !important;
+        margin-bottom: 0.1rem !important;
+    }
+
+    /* Input boxes */
+    div[data-baseweb="input"] {
+        min-height: 2.25rem !important;
+    }
+
+    div[data-baseweb="select"] {
+        min-height: 2.25rem !important;
+    }
+
+    input {
+        font-size: 0.92rem !important;
+    }
+
+    /* Cards */
+    .card {
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.85rem;
+        padding: 1.05rem 1.15rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+
+    .result-card {
+        background-color: #f8fafc;
+        border: 1px solid #dbeafe;
+        border-radius: 0.85rem;
+        padding: 1.05rem 1.15rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+
+    .title-note {
+        font-size: 0.98rem;
+        color: #4b5563;
+        line-height: 1.45;
+        margin-bottom: 0.55rem;
+    }
+
+    .disclaimer {
+        font-size: 0.82rem;
+        color: #92400e;
+        background-color: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 0.55rem;
+        padding: 0.55rem 0.75rem;
+        line-height: 1.35;
+        margin-top: 0.35rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .small-note {
+        font-size: 0.84rem;
+        color: #6b7280;
+        line-height: 1.45;
+    }
+
+    .risk-low {
+        background-color: #ecfdf5;
+        color: #065f46;
+        border: 1px solid #a7f3d0;
+        border-radius: 0.65rem;
+        padding: 0.65rem 0.8rem;
+        font-size: 0.92rem;
+        line-height: 1.4;
+        font-weight: 600;
+    }
+
+    .risk-moderate {
+        background-color: #fffbeb;
+        color: #92400e;
+        border: 1px solid #fde68a;
+        border-radius: 0.65rem;
+        padding: 0.65rem 0.8rem;
+        font-size: 0.92rem;
+        line-height: 1.4;
+        font-weight: 600;
+    }
+
+    .risk-high {
+        background-color: #fef2f2;
+        color: #991b1b;
+        border: 1px solid #fecaca;
+        border-radius: 0.65rem;
+        padding: 0.65rem 0.8rem;
+        font-size: 0.92rem;
+        line-height: 1.4;
+        font-weight: 600;
+    }
+
+    /* Metrics */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
+        padding: 0.75rem 0.85rem;
+        border-radius: 0.7rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.88rem !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.65rem !important;
+        color: #111827;
+    }
+
+    .footer-note {
+        font-size: 0.76rem;
+        color: #6b7280;
+        line-height: 1.35;
+        margin-top: 0.65rem;
+        border-top: 1px solid #e5e7eb;
+        padding-top: 0.45rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# 3. Paths
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-
-# 兼容两种文件结构：
-# 结构1：模型文件放在根目录
-#   app.py
-#   final_svm_model.pkl
-#   model_metadata.json
-#
-# 结构2：模型文件放在 model 文件夹
-#   app.py
-#   model/final_svm_model.pkl
-#   model/model_metadata.json
 
 MODEL_CANDIDATE_PATHS = [
     BASE_DIR / "final_svm_model.pkl",
@@ -52,9 +214,6 @@ METADATA_CANDIDATE_PATHS = [
 
 
 def find_existing_file(candidate_paths, file_description):
-    """
-    Find the first existing file from candidate paths.
-    """
     for path in candidate_paths:
         if path.exists():
             return path
@@ -78,7 +237,7 @@ METADATA_PATH = find_existing_file(
 
 
 # ============================================================
-# 3. Default metadata fallback
+# 4. Default metadata
 # ============================================================
 
 DEFAULT_METADATA = {
@@ -131,38 +290,24 @@ DEFAULT_METADATA = {
 
 
 # ============================================================
-# 4. Load model and metadata
+# 5. Load model and metadata
 # ============================================================
 
 @st.cache_resource
 def load_model():
-    """
-    Load fitted SVM model or sklearn Pipeline.
-    The model must support predict_proba().
-    """
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            f"Model file not found: {MODEL_PATH}"
-        )
-
     with open(MODEL_PATH, "rb") as f:
         model = pickle.load(f)
-
     return model
 
 
 @st.cache_data
 def load_metadata():
-    """
-    Load model metadata.
-    """
     if not METADATA_PATH.exists():
         return DEFAULT_METADATA
 
     with open(METADATA_PATH, "r", encoding="utf-8") as f:
         metadata = json.load(f)
 
-    # 如果 metadata 缺少某些字段，则用默认值补齐
     for key, value in DEFAULT_METADATA.items():
         if key not in metadata:
             metadata[key] = value
@@ -180,21 +325,17 @@ except Exception as e:
 
 
 features = metadata["features"]
-feature_labels = metadata.get("feature_labels", DEFAULT_METADATA["feature_labels"])
 encoding = metadata.get("categorical_encoding", DEFAULT_METADATA["categorical_encoding"])
 risk_thresholds = metadata.get("risk_thresholds", DEFAULT_METADATA["risk_thresholds"])
 
 
 # ============================================================
-# 5. Helper functions
+# 6. Helper functions
 # ============================================================
 
 def get_predictor(model_object):
     """
     Extract a fitted model or pipeline that supports predict_proba().
-    Supports:
-    1. sklearn Pipeline / fitted estimator with predict_proba()
-    2. dict containing model / pipeline / fitted_model / best_model
     """
     if hasattr(model_object, "predict_proba"):
         return model_object
@@ -206,8 +347,7 @@ def get_predictor(model_object):
 
     raise ValueError(
         "No fitted model or pipeline with predict_proba() was found in the uploaded .pkl file. "
-        f"The loaded object type is: {type(model_object)}. "
-        "Please make sure final_svm_model.pkl contains a fitted sklearn Pipeline or SVC(probability=True)."
+        f"The loaded object type is: {type(model_object)}."
     )
 
 
@@ -215,23 +355,13 @@ predictor = get_predictor(model)
 
 
 def predict_probability(input_df: pd.DataFrame) -> float:
-    """
-    Predict probability of ICU-acquired pressure injury.
-    """
     input_df = input_df.copy()
-
-    # 确保变量顺序和建模时一致
     input_df = input_df[features]
-
     prob = predictor.predict_proba(input_df)[:, 1][0]
-
     return float(prob)
 
 
 def classify_risk(prob: float) -> str:
-    """
-    Classify predicted probability into risk categories.
-    """
     low_cut = float(risk_thresholds.get("low", 0.10))
     moderate_cut = float(risk_thresholds.get("moderate", 0.20))
 
@@ -244,27 +374,23 @@ def classify_risk(prob: float) -> str:
 
 
 def risk_message(prob: float) -> str:
-    """
-    Clinical-style explanation for risk category.
-    """
     risk_group = classify_risk(prob)
 
     if risk_group == "Low risk":
-        return (
-            "The predicted risk is low. Continue routine pressure injury prevention "
-            "and standard skin monitoring."
-        )
+        return "Routine pressure injury prevention and standard skin monitoring are suggested."
     elif risk_group == "Moderate risk":
-        return (
-            "The predicted risk is moderate. Consider enhanced preventive measures, "
-            "closer skin assessment, and individualized nursing care."
-        )
+        return "Enhanced preventive measures and closer skin assessment should be considered."
     else:
-        return (
-            "The predicted risk is high. Consider intensive pressure injury prevention, "
-            "frequent repositioning, pressure redistribution support surfaces, and "
-            "comprehensive clinical assessment."
-        )
+        return "Intensive prevention, frequent repositioning, and pressure redistribution should be considered."
+
+
+def risk_css_class(risk_group: str) -> str:
+    if risk_group == "Low risk":
+        return "risk-low"
+    elif risk_group == "Moderate risk":
+        return "risk-moderate"
+    else:
+        return "risk-high"
 
 
 def build_input_dataframe(
@@ -277,9 +403,6 @@ def build_input_dataframe(
     ventilation_mode_label,
     vasoactive_drugs_label
 ):
-    """
-    Build input dataframe using the same feature names and order as model training.
-    """
     input_data = {
         "age_years": age_years,
         "sofa_score": sofa_score,
@@ -291,249 +414,244 @@ def build_input_dataframe(
         "vasoactive_drugs": encoding["vasoactive_drugs"][vasoactive_drugs_label]
     }
 
-    input_df = pd.DataFrame([input_data], columns=features)
-
-    return input_df
+    return pd.DataFrame([input_data], columns=features)
 
 
 # ============================================================
-# 6. Sidebar
-# ============================================================
-
-st.sidebar.title("About this tool")
-
-st.sidebar.markdown(
-    """
-This web calculator estimates the predicted risk of **ICU-acquired pressure injury**
-using the final support vector machine model.
-
-**Important:** This tool is intended for research demonstration only.  
-It should not be used as a standalone clinical decision-making tool before multicenter external validation.
-"""
-)
-
-st.sidebar.markdown("---")
-
-st.sidebar.markdown(
-    """
-**Predictors**
-
-1. Age  
-2. SOFA score  
-3. SpO₂  
-4. Hemoglobin  
-5. Albumin  
-6. Mechanical ventilation  
-7. Ventilation mode  
-8. Vasoactive drugs
-"""
-)
-
-with st.sidebar.expander("Technical information", expanded=False):
-    st.write("Model path:")
-    st.code(str(MODEL_PATH))
-
-    st.write("Metadata path:")
-    st.code(str(METADATA_PATH))
-
-    st.write("Model file exists:")
-    st.write(MODEL_PATH.exists())
-
-    st.write("Metadata file exists:")
-    st.write(METADATA_PATH.exists())
-
-    st.write("Loaded model type:")
-    st.code(str(type(model)))
-
-    st.write("Predictor type:")
-    st.code(str(type(predictor)))
-
-    st.write("predict_proba available:")
-    st.write(hasattr(predictor, "predict_proba"))
-
-
-# ============================================================
-# 7. Main page
+# 7. Header
 # ============================================================
 
 st.title("ICU-Acquired Pressure Injury Risk Calculator")
 
 st.markdown(
     """
-This calculator provides an estimated probability of ICU-acquired pressure injury
-based on the final support vector machine model.
-
-Please enter the patient's baseline clinical information below.
-"""
+    <div class="title-note">
+    Estimated risk of ICU-acquired pressure injury based on a final support vector machine model.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-st.warning(
-    "For research demonstration only. Not intended for direct clinical decision-making before external validation."
+st.markdown(
+    """
+    <div class="disclaimer">
+    Research demonstration only. This tool is not intended for direct clinical decision-making before external validation and local calibration.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
 # ============================================================
-# 8. Input form
+# 8. One-screen layout
 # ============================================================
 
-with st.form("prediction_form"):
+left_col, right_col = st.columns([1.65, 1.0], gap="large")
+
+
+# ============================================================
+# 9. Inputs
+# ============================================================
+
+with left_col:
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
 
     st.subheader("Patient information")
 
-    age_years = st.number_input(
-        "Age, years",
-        min_value=18,
-        max_value=110,
-        value=65,
-        step=1
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+
+    with row1_col1:
+        age_years = st.number_input(
+            "Age, years",
+            min_value=18,
+            max_value=110,
+            value=65,
+            step=1
+        )
+
+    with row1_col2:
+        sofa_score = st.number_input(
+            "SOFA score",
+            min_value=0,
+            max_value=24,
+            value=6,
+            step=1
+        )
+
+    with row1_col3:
+        spo2_pct = st.number_input(
+            "SpO₂, %",
+            min_value=50.0,
+            max_value=100.0,
+            value=95.0,
+            step=0.1,
+            format="%.1f"
+        )
+
+    with row1_col4:
+        hemoglobin_gl = st.number_input(
+            "Hemoglobin, g/L",
+            min_value=30.0,
+            max_value=220.0,
+            value=110.0,
+            step=1.0,
+            format="%.0f"
+        )
+
+    with row2_col1:
+        albumin_gl = st.number_input(
+            "Albumin, g/L",
+            min_value=10.0,
+            max_value=60.0,
+            value=35.0,
+            step=0.1,
+            format="%.1f"
+        )
+
+    with row2_col2:
+        mechanical_ventilation_label = st.selectbox(
+            "Mechanical ventilation",
+            options=["No", "Yes"],
+            index=0
+        )
+
+    with row2_col3:
+        ventilation_mode_label = st.selectbox(
+            "Ventilation mode",
+            options=[
+                "No ventilation",
+                "Non-invasive ventilation",
+                "Invasive ventilation"
+            ],
+            index=0
+        )
+
+    with row2_col4:
+        vasoactive_drugs_label = st.selectbox(
+            "Vasoactive drugs",
+            options=["No", "Yes"],
+            index=0
+        )
+
+    st.markdown(
+        """
+        <div class="small-note">
+        All predictors should be assessed at baseline or within the first 24 hours after ICU admission.
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    sofa_score = st.number_input(
-        "SOFA score",
-        min_value=0,
-        max_value=24,
-        value=6,
-        step=1
-    )
-
-    spo2_pct = st.number_input(
-        "SpO₂, %",
-        min_value=50.0,
-        max_value=100.0,
-        value=95.0,
-        step=0.1
-    )
-
-    hemoglobin_gl = st.number_input(
-        "Hemoglobin, g/L",
-        min_value=30.0,
-        max_value=220.0,
-        value=110.0,
-        step=1.0
-    )
-
-    albumin_gl = st.number_input(
-        "Albumin, g/L",
-        min_value=10.0,
-        max_value=60.0,
-        value=35.0,
-        step=0.1
-    )
-
-    mechanical_ventilation_label = st.selectbox(
-        "Mechanical ventilation",
-        options=["No", "Yes"],
-        index=0
-    )
-
-    ventilation_mode_label = st.selectbox(
-        "Ventilation mode",
-        options=[
-            "No ventilation",
-            "Non-invasive ventilation",
-            "Invasive ventilation"
-        ],
-        index=0
-    )
-
-    vasoactive_drugs_label = st.selectbox(
-        "Vasoactive drugs",
-        options=["No", "Yes"],
-        index=0
-    )
-
-    submitted = st.form_submit_button("Calculate risk")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
-# 9. Prediction output
+# 10. Automatic prediction
 # ============================================================
 
-if submitted:
+input_df = build_input_dataframe(
+    age_years=age_years,
+    sofa_score=sofa_score,
+    spo2_pct=spo2_pct,
+    hemoglobin_gl=hemoglobin_gl,
+    albumin_gl=albumin_gl,
+    mechanical_ventilation_label=mechanical_ventilation_label,
+    ventilation_mode_label=ventilation_mode_label,
+    vasoactive_drugs_label=vasoactive_drugs_label
+)
 
-    input_df = build_input_dataframe(
-        age_years=age_years,
-        sofa_score=sofa_score,
-        spo2_pct=spo2_pct,
-        hemoglobin_gl=hemoglobin_gl,
-        albumin_gl=albumin_gl,
-        mechanical_ventilation_label=mechanical_ventilation_label,
-        ventilation_mode_label=ventilation_mode_label,
-        vasoactive_drugs_label=vasoactive_drugs_label
-    )
+try:
+    prob = predict_probability(input_df)
+    risk_group = classify_risk(prob)
+    risk_text = risk_message(prob)
+    css_class = risk_css_class(risk_group)
+except Exception as e:
+    prob = None
+    risk_group = "Prediction failed"
+    risk_text = str(e)
+    css_class = "risk-high"
 
-    try:
-        prob = predict_probability(input_df)
-        risk_group = classify_risk(prob)
 
-        st.markdown("---")
-        st.subheader("Prediction result")
+# ============================================================
+# 11. Result panel
+# ============================================================
 
-        col1, col2 = st.columns(2)
+with right_col:
 
-        with col1:
+    st.markdown('<div class="result-card">', unsafe_allow_html=True)
+
+    st.subheader("Prediction result")
+
+    if prob is not None:
+        metric_col1, metric_col2 = st.columns(2)
+
+        with metric_col1:
             st.metric(
                 label="Predicted probability",
                 value=f"{prob * 100:.1f}%"
             )
 
-        with col2:
+        with metric_col2:
             st.metric(
                 label="Risk category",
                 value=risk_group
             )
 
-        if risk_group == "Low risk":
-            st.success(risk_message(prob))
-        elif risk_group == "Moderate risk":
-            st.warning(risk_message(prob))
-        else:
-            st.error(risk_message(prob))
-
-        st.markdown("### Input summary")
-
-        display_df = pd.DataFrame({
-            "Predictor": [
-                "Age, years",
-                "SOFA score",
-                "SpO₂, %",
-                "Hemoglobin, g/L",
-                "Albumin, g/L",
-                "Mechanical ventilation",
-                "Ventilation mode",
-                "Vasoactive drugs"
-            ],
-            "Value": [
-                age_years,
-                sofa_score,
-                spo2_pct,
-                hemoglobin_gl,
-                albumin_gl,
-                mechanical_ventilation_label,
-                ventilation_mode_label,
-                vasoactive_drugs_label
-            ]
-        })
-
-        st.dataframe(display_df, use_container_width=True)
-
-        with st.expander("Encoded model input", expanded=False):
-            st.dataframe(input_df, use_container_width=True)
-
-    except Exception as e:
-        st.error(
-            "Prediction failed. Please check whether the saved model is compatible with the app."
+        st.markdown(
+            f"""
+            <div class="{css_class}">
+            {risk_text}
+            </div>
+            """,
+            unsafe_allow_html=True
         )
-        st.exception(e)
+
+        st.markdown(
+            f"""
+            <div class="small-note">
+            Risk thresholds: low &lt; {float(risk_thresholds.get("low", 0.10)):.2f}; 
+            moderate {float(risk_thresholds.get("low", 0.10)):.2f}–{float(risk_thresholds.get("moderate", 0.20)):.2f}; 
+            high ≥ {float(risk_thresholds.get("moderate", 0.20)):.2f}.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    else:
+        st.metric(
+            label="Predicted probability",
+            value="—"
+        )
+
+        st.metric(
+            label="Risk category",
+            value="Prediction failed"
+        )
+
+        st.markdown(
+            f"""
+            <div class="{css_class}">
+            {risk_text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
-# 10. Footer
+# 12. Compact input summary for screenshot
 # ============================================================
 
-st.markdown("---")
-
-st.caption(
-    "This model is intended for research demonstration only. "
-    "Clinical use requires further external validation and local calibration."
+st.markdown(
+    """
+    <div class="footer-note">
+    Model inputs: age, SOFA score, SpO₂, hemoglobin, albumin, mechanical ventilation, ventilation mode, and vasoactive drug use. 
+    This web calculator is intended for research demonstration only; clinical use requires multicenter external validation and local calibration.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
