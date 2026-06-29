@@ -13,7 +13,7 @@ import streamlit as st
 
 
 # ============================================================
-# Page configuration
+# 1. Page configuration
 # ============================================================
 
 st.set_page_config(
@@ -24,153 +24,204 @@ st.set_page_config(
 
 
 # ============================================================
-# Paths
+# 2. Paths
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# These filenames must be exactly the same as those in your GitHub repository
-MODEL_PATH = BASE_DIR / "final_full_data_SVM.pkl"
-METADATA_PATH = BASE_DIR / "model_metadata.json"
+# 兼容两种文件结构：
+# 结构1：模型文件放在根目录
+#   app.py
+#   final_svm_model.pkl
+#   model_metadata.json
+#
+# 结构2：模型文件放在 model 文件夹
+#   app.py
+#   model/final_svm_model.pkl
+#   model/model_metadata.json
+
+MODEL_CANDIDATE_PATHS = [
+    BASE_DIR / "final_svm_model.pkl",
+    BASE_DIR / "model" / "final_svm_model.pkl"
+]
+
+METADATA_CANDIDATE_PATHS = [
+    BASE_DIR / "model_metadata.json",
+    BASE_DIR / "model" / "model_metadata.json"
+]
+
+
+def find_existing_file(candidate_paths, file_description):
+    """
+    Find the first existing file from candidate paths.
+    """
+    for path in candidate_paths:
+        if path.exists():
+            return path
+
+    checked_paths = "\n".join([str(p) for p in candidate_paths])
+
+    raise FileNotFoundError(
+        f"{file_description} was not found. Checked paths:\n{checked_paths}"
+    )
+
+
+MODEL_PATH = find_existing_file(
+    MODEL_CANDIDATE_PATHS,
+    "Model file"
+)
+
+METADATA_PATH = find_existing_file(
+    METADATA_CANDIDATE_PATHS,
+    "Metadata file"
+)
 
 
 # ============================================================
-# Load model and metadata
+# 3. Default metadata fallback
+# ============================================================
+
+DEFAULT_METADATA = {
+    "model_name": "SVM model for ICU-acquired pressure injury prediction",
+    "outcome": "ICU-acquired pressure injury",
+    "features": [
+        "age_years",
+        "sofa_score",
+        "spo2_pct",
+        "hemoglobin_gl",
+        "albumin_gl",
+        "mechanical_ventilation",
+        "ventilation_mode",
+        "vasoactive_drugs"
+    ],
+    "feature_labels": {
+        "age_years": "Age, years",
+        "sofa_score": "SOFA score",
+        "spo2_pct": "SpO₂, %",
+        "hemoglobin_gl": "Hemoglobin, g/L",
+        "albumin_gl": "Albumin, g/L",
+        "mechanical_ventilation": "Mechanical ventilation",
+        "ventilation_mode": "Ventilation mode",
+        "vasoactive_drugs": "Vasoactive drugs"
+    },
+    "categorical_encoding": {
+        "mechanical_ventilation": {
+            "No": 0,
+            "Yes": 1
+        },
+        "ventilation_mode": {
+            "No ventilation": 0,
+            "Non-invasive ventilation": 1,
+            "Invasive ventilation": 2
+        },
+        "vasoactive_drugs": {
+            "No": 0,
+            "Yes": 1
+        }
+    },
+    "risk_thresholds": {
+        "low": 0.10,
+        "moderate": 0.20
+    },
+    "disclaimer": (
+        "This calculator is intended for research demonstration only and should not be used "
+        "as a standalone clinical decision-making tool before external validation."
+    )
+}
+
+
+# ============================================================
+# 4. Load model and metadata
 # ============================================================
 
 @st.cache_resource
 def load_model():
+    """
+    Load fitted SVM model or sklearn Pipeline.
+    The model must support predict_proba().
+    """
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
-            f"Model file not found: {MODEL_PATH}. "
-            "Please make sure final_full_data_SVM.pkl is uploaded to the GitHub repository root."
+            f"Model file not found: {MODEL_PATH}"
         )
 
     with open(MODEL_PATH, "rb") as f:
-        loaded_model = pickle.load(f)
+        model = pickle.load(f)
 
-    return loaded_model
+    return model
 
 
 @st.cache_data
 def load_metadata():
+    """
+    Load model metadata.
+    """
     if not METADATA_PATH.exists():
-        raise FileNotFoundError(
-            f"Metadata file not found: {METADATA_PATH}. "
-            "Please make sure model_metadata.json is uploaded to the GitHub repository root."
-        )
+        return DEFAULT_METADATA
 
     with open(METADATA_PATH, "r", encoding="utf-8") as f:
         metadata = json.load(f)
 
+    # 如果 metadata 缺少某些字段，则用默认值补齐
+    for key, value in DEFAULT_METADATA.items():
+        if key not in metadata:
+            metadata[key] = value
+
     return metadata
 
 
-model = load_model()
-metadata = load_metadata()
+try:
+    model = load_model()
+    metadata = load_metadata()
+except Exception as e:
+    st.error("Failed to load model or metadata.")
+    st.exception(e)
+    st.stop()
+
 
 features = metadata["features"]
-feature_labels = metadata["feature_labels"]
-encoding = metadata["categorical_encoding"]
-risk_thresholds = metadata["risk_thresholds"]
+feature_labels = metadata.get("feature_labels", DEFAULT_METADATA["feature_labels"])
+encoding = metadata.get("categorical_encoding", DEFAULT_METADATA["categorical_encoding"])
+risk_thresholds = metadata.get("risk_thresholds", DEFAULT_METADATA["risk_thresholds"])
 
 
 # ============================================================
-# Helper functions
+# 5. Helper functions
 # ============================================================
 
-def find_predictable_model(obj, max_depth=5):
+def get_predictor(model_object):
     """
-    Recursively search for a fitted model or pipeline that supports predict_proba().
-    This is useful when the pickle file saves a dictionary containing the model.
+    Extract a fitted model or pipeline that supports predict_proba().
+    Supports:
+    1. sklearn Pipeline / fitted estimator with predict_proba()
+    2. dict containing model / pipeline / fitted_model / best_model
     """
+    if hasattr(model_object, "predict_proba"):
+        return model_object
 
-    if max_depth <= 0:
-        return None
+    if isinstance(model_object, dict):
+        for key in ["model", "pipeline", "fitted_model", "best_model", "final_model"]:
+            if key in model_object and hasattr(model_object[key], "predict_proba"):
+                return model_object[key]
 
-    # Case 1: directly saved sklearn model or pipeline
-    if hasattr(obj, "predict_proba"):
-        return obj
-
-    # Case 2: dictionary object
-    if isinstance(obj, dict):
-        preferred_keys = [
-            "model",
-            "final_model",
-            "svm_model",
-            "final_svm_model",
-            "best_model",
-            "pipeline",
-            "final_pipeline",
-            "classifier",
-            "clf",
-            "fit",
-            "estimator"
-        ]
-
-        # Search preferred keys first
-        for key in preferred_keys:
-            if key in obj:
-                found = find_predictable_model(obj[key], max_depth=max_depth - 1)
-                if found is not None:
-                    return found
-
-        # Then search all values
-        for value in obj.values():
-            found = find_predictable_model(value, max_depth=max_depth - 1)
-            if found is not None:
-                return found
-
-    # Case 3: list or tuple object
-    if isinstance(obj, (list, tuple)):
-        for item in obj:
-            found = find_predictable_model(item, max_depth=max_depth - 1)
-            if found is not None:
-                return found
-
-    return None
+    raise ValueError(
+        "No fitted model or pipeline with predict_proba() was found in the uploaded .pkl file. "
+        f"The loaded object type is: {type(model_object)}. "
+        "Please make sure final_svm_model.pkl contains a fitted sklearn Pipeline or SVC(probability=True)."
+    )
 
 
-def describe_loaded_object(obj):
-    """
-    Return a short diagnostic description of the loaded pickle object.
-    """
-
-    obj_type = type(obj).__name__
-
-    if isinstance(obj, dict):
-        return f"The loaded object is a dictionary. Available keys: {list(obj.keys())}"
-
-    if isinstance(obj, pd.DataFrame):
-        return f"The loaded object is a pandas DataFrame with shape: {obj.shape}"
-
-    if isinstance(obj, np.ndarray):
-        return f"The loaded object is a NumPy array with shape: {obj.shape}"
-
-    if isinstance(obj, (list, tuple)):
-        return f"The loaded object is a {obj_type} with length: {len(obj)}"
-
-    return f"The loaded object type is: {obj_type}"
+predictor = get_predictor(model)
 
 
 def predict_probability(input_df: pd.DataFrame) -> float:
     """
-    Predict probability using the loaded final SVM model.
-    The saved model should be a fitted sklearn model or pipeline with predict_proba().
+    Predict probability of ICU-acquired pressure injury.
     """
+    input_df = input_df.copy()
 
-    predictor = find_predictable_model(model)
-
-    if predictor is None:
-        diagnostic_message = describe_loaded_object(model)
-
-        raise ValueError(
-            "No fitted model or pipeline with predict_proba() was found in the uploaded .pkl file. "
-            f"{diagnostic_message}. "
-            "Please make sure the uploaded .pkl file contains the final fitted SVM probability model "
-            "or sklearn Pipeline. If the SVM was trained using sklearn.svm.SVC, it should be trained "
-            "with probability=True."
-        )
+    # 确保变量顺序和建模时一致
+    input_df = input_df[features]
 
     prob = predictor.predict_proba(input_df)[:, 1][0]
 
@@ -178,8 +229,11 @@ def predict_probability(input_df: pd.DataFrame) -> float:
 
 
 def classify_risk(prob: float) -> str:
-    low_cut = risk_thresholds.get("low", 0.10)
-    moderate_cut = risk_thresholds.get("moderate", 0.20)
+    """
+    Classify predicted probability into risk categories.
+    """
+    low_cut = float(risk_thresholds.get("low", 0.10))
+    moderate_cut = float(risk_thresholds.get("moderate", 0.20))
 
     if prob < low_cut:
         return "Low risk"
@@ -190,18 +244,60 @@ def classify_risk(prob: float) -> str:
 
 
 def risk_message(prob: float) -> str:
+    """
+    Clinical-style explanation for risk category.
+    """
     risk_group = classify_risk(prob)
 
     if risk_group == "Low risk":
-        return "The predicted risk is low. Continue routine pressure injury prevention and monitoring."
+        return (
+            "The predicted risk is low. Continue routine pressure injury prevention "
+            "and standard skin monitoring."
+        )
     elif risk_group == "Moderate risk":
-        return "The predicted risk is moderate. Consider enhanced preventive measures and closer skin assessment."
+        return (
+            "The predicted risk is moderate. Consider enhanced preventive measures, "
+            "closer skin assessment, and individualized nursing care."
+        )
     else:
-        return "The predicted risk is high. Consider intensive pressure injury prevention, frequent repositioning, and comprehensive clinical assessment."
+        return (
+            "The predicted risk is high. Consider intensive pressure injury prevention, "
+            "frequent repositioning, pressure redistribution support surfaces, and "
+            "comprehensive clinical assessment."
+        )
+
+
+def build_input_dataframe(
+    age_years,
+    sofa_score,
+    spo2_pct,
+    hemoglobin_gl,
+    albumin_gl,
+    mechanical_ventilation_label,
+    ventilation_mode_label,
+    vasoactive_drugs_label
+):
+    """
+    Build input dataframe using the same feature names and order as model training.
+    """
+    input_data = {
+        "age_years": age_years,
+        "sofa_score": sofa_score,
+        "spo2_pct": spo2_pct,
+        "hemoglobin_gl": hemoglobin_gl,
+        "albumin_gl": albumin_gl,
+        "mechanical_ventilation": encoding["mechanical_ventilation"][mechanical_ventilation_label],
+        "ventilation_mode": encoding["ventilation_mode"][ventilation_mode_label],
+        "vasoactive_drugs": encoding["vasoactive_drugs"][vasoactive_drugs_label]
+    }
+
+    input_df = pd.DataFrame([input_data], columns=features)
+
+    return input_df
 
 
 # ============================================================
-# Sidebar
+# 6. Sidebar
 # ============================================================
 
 st.sidebar.title("About this tool")
@@ -209,7 +305,7 @@ st.sidebar.title("About this tool")
 st.sidebar.markdown(
     """
 This web calculator estimates the predicted risk of **ICU-acquired pressure injury**
-using a final SVM model.
+using the final support vector machine model.
 
 **Important:** This tool is intended for research demonstration only.  
 It should not be used as a standalone clinical decision-making tool before multicenter external validation.
@@ -233,9 +329,31 @@ st.sidebar.markdown(
 """
 )
 
+with st.sidebar.expander("Technical information", expanded=False):
+    st.write("Model path:")
+    st.code(str(MODEL_PATH))
+
+    st.write("Metadata path:")
+    st.code(str(METADATA_PATH))
+
+    st.write("Model file exists:")
+    st.write(MODEL_PATH.exists())
+
+    st.write("Metadata file exists:")
+    st.write(METADATA_PATH.exists())
+
+    st.write("Loaded model type:")
+    st.code(str(type(model)))
+
+    st.write("Predictor type:")
+    st.code(str(type(predictor)))
+
+    st.write("predict_proba available:")
+    st.write(hasattr(predictor, "predict_proba"))
+
 
 # ============================================================
-# Main page
+# 7. Main page
 # ============================================================
 
 st.title("ICU-Acquired Pressure Injury Risk Calculator")
@@ -255,7 +373,7 @@ st.warning(
 
 
 # ============================================================
-# Input form
+# 8. Input form
 # ============================================================
 
 with st.form("prediction_form"):
@@ -328,23 +446,21 @@ with st.form("prediction_form"):
 
 
 # ============================================================
-# Prediction
+# 9. Prediction output
 # ============================================================
 
 if submitted:
 
-    input_data = {
-        "age_years": age_years,
-        "sofa_score": sofa_score,
-        "spo2_pct": spo2_pct,
-        "hemoglobin_gl": hemoglobin_gl,
-        "albumin_gl": albumin_gl,
-        "mechanical_ventilation": encoding["mechanical_ventilation"][mechanical_ventilation_label],
-        "ventilation_mode": encoding["ventilation_mode"][ventilation_mode_label],
-        "vasoactive_drugs": encoding["vasoactive_drugs"][vasoactive_drugs_label]
-    }
-
-    input_df = pd.DataFrame([input_data], columns=features)
+    input_df = build_input_dataframe(
+        age_years=age_years,
+        sofa_score=sofa_score,
+        spo2_pct=spo2_pct,
+        hemoglobin_gl=hemoglobin_gl,
+        albumin_gl=albumin_gl,
+        mechanical_ventilation_label=mechanical_ventilation_label,
+        ventilation_mode_label=ventilation_mode_label,
+        vasoactive_drugs_label=vasoactive_drugs_label
+    )
 
     try:
         prob = predict_probability(input_df)
@@ -401,6 +517,9 @@ if submitted:
 
         st.dataframe(display_df, use_container_width=True)
 
+        with st.expander("Encoded model input", expanded=False):
+            st.dataframe(input_df, use_container_width=True)
+
     except Exception as e:
         st.error(
             "Prediction failed. Please check whether the saved model is compatible with the app."
@@ -409,7 +528,7 @@ if submitted:
 
 
 # ============================================================
-# Footer
+# 10. Footer
 # ============================================================
 
 st.markdown("---")
