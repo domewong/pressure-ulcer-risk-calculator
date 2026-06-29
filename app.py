@@ -29,7 +29,7 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# 注意：这里要和 GitHub 仓库里的文件名完全一致
+# These filenames must be exactly the same as those in your GitHub repository
 MODEL_PATH = BASE_DIR / "final_full_data_SVM.pkl"
 METADATA_PATH = BASE_DIR / "model_metadata.json"
 
@@ -79,33 +79,100 @@ risk_thresholds = metadata["risk_thresholds"]
 # Helper functions
 # ============================================================
 
+def find_predictable_model(obj, max_depth=5):
+    """
+    Recursively search for a fitted model or pipeline that supports predict_proba().
+    This is useful when the pickle file saves a dictionary containing the model.
+    """
+
+    if max_depth <= 0:
+        return None
+
+    # Case 1: directly saved sklearn model or pipeline
+    if hasattr(obj, "predict_proba"):
+        return obj
+
+    # Case 2: dictionary object
+    if isinstance(obj, dict):
+        preferred_keys = [
+            "model",
+            "final_model",
+            "svm_model",
+            "final_svm_model",
+            "best_model",
+            "pipeline",
+            "final_pipeline",
+            "classifier",
+            "clf",
+            "fit",
+            "estimator"
+        ]
+
+        # Search preferred keys first
+        for key in preferred_keys:
+            if key in obj:
+                found = find_predictable_model(obj[key], max_depth=max_depth - 1)
+                if found is not None:
+                    return found
+
+        # Then search all values
+        for value in obj.values():
+            found = find_predictable_model(value, max_depth=max_depth - 1)
+            if found is not None:
+                return found
+
+    # Case 3: list or tuple object
+    if isinstance(obj, (list, tuple)):
+        for item in obj:
+            found = find_predictable_model(item, max_depth=max_depth - 1)
+            if found is not None:
+                return found
+
+    return None
+
+
+def describe_loaded_object(obj):
+    """
+    Return a short diagnostic description of the loaded pickle object.
+    """
+
+    obj_type = type(obj).__name__
+
+    if isinstance(obj, dict):
+        return f"The loaded object is a dictionary. Available keys: {list(obj.keys())}"
+
+    if isinstance(obj, pd.DataFrame):
+        return f"The loaded object is a pandas DataFrame with shape: {obj.shape}"
+
+    if isinstance(obj, np.ndarray):
+        return f"The loaded object is a NumPy array with shape: {obj.shape}"
+
+    if isinstance(obj, (list, tuple)):
+        return f"The loaded object is a {obj_type} with length: {len(obj)}"
+
+    return f"The loaded object type is: {obj_type}"
+
+
 def predict_probability(input_df: pd.DataFrame) -> float:
     """
     Predict probability using the loaded final SVM model.
-    The saved model should include the same preprocessing pipeline
-    used during model development.
+    The saved model should be a fitted sklearn model or pipeline with predict_proba().
     """
 
-    # 情况1：直接保存的是 sklearn 模型或 Pipeline
-    if hasattr(model, "predict_proba"):
-        prob = model.predict_proba(input_df)[:, 1][0]
+    predictor = find_predictable_model(model)
 
-    # 情况2：保存的是字典，模型在 model["model"] 里面
-    elif isinstance(model, dict) and "model" in model:
-        fitted_model = model["model"]
+    if predictor is None:
+        diagnostic_message = describe_loaded_object(model)
 
-        if hasattr(fitted_model, "predict_proba"):
-            prob = fitted_model.predict_proba(input_df)[:, 1][0]
-        else:
-            raise ValueError(
-                "The fitted model inside the saved dictionary does not support predict_proba."
-            )
-
-    else:
         raise ValueError(
-            "The loaded object does not support predict_proba. "
-            "Please make sure the uploaded .pkl file is the final SVM probability model or pipeline."
+            "No fitted model or pipeline with predict_proba() was found in the uploaded .pkl file. "
+            f"{diagnostic_message}. "
+            "Please make sure the uploaded .pkl file contains the final fitted SVM probability model "
+            "or sklearn Pipeline. If the SVM was trained using sklearn.svm.SVC, it should be trained "
+            "with probability=True."
         )
+
+    prob = predictor.predict_proba(input_df)[:, 1][0]
 
     return float(prob)
 
